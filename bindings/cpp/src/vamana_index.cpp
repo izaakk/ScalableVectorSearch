@@ -60,14 +60,15 @@ struct VamanaIndexManagerBase : public VamanaIndex {
         float* distances,
         size_t* labels,
         const SearchParams* params = nullptr,
-        IDFilter* filter = nullptr
+        IDFilter* filter = nullptr,
+        IDGrouper* grouper = nullptr
     ) const noexcept override {
         return runtime_error_wrapper([&] {
             auto result = svs::QueryResultView<size_t>{
                 svs::MatrixView<size_t>{svs::make_dims(n, k), labels},
                 svs::MatrixView<float>{svs::make_dims(n, k), distances}};
             auto queries = svs::data::ConstSimpleDataView<float>(x, n, impl_->dimensions());
-            impl_->search(result, queries, params, filter);
+            impl_->search(result, queries, params, filter, grouper);
         });
     }
 
@@ -77,11 +78,12 @@ struct VamanaIndexManagerBase : public VamanaIndex {
         float radius,
         const ResultsAllocator& results,
         const SearchParams* params = nullptr,
-        IDFilter* filter = nullptr
+        IDFilter* filter = nullptr,
+        IDGrouper* grouper = nullptr
     ) const noexcept override {
         return runtime_error_wrapper([&] {
             auto queries = svs::data::ConstSimpleDataView<float>(x, n, impl_->dimensions());
-            impl_->range_search(queries, radius, results, params, filter);
+            impl_->range_search(queries, radius, results, params, filter, grouper);
         });
     }
 

@@ -110,7 +110,8 @@ class VamanaIndexImpl {
         svs::QueryResultView<size_t> result,
         svs::data::ConstSimpleDataView<float> queries,
         const VamanaIndex::SearchParams* params = nullptr,
-        IDFilter* filter = nullptr
+        IDFilter* filter = nullptr,
+        IDGrouper* grouper = nullptr
     ) const {
         if (!impl_) {
             auto& dists = result.distances();
@@ -132,8 +133,56 @@ class VamanaIndexImpl {
         auto sp = make_search_parameters(params);
 
         // Simple search
-        if (filter == nullptr) {
+        if (filter == nullptr && grouper == nullptr) {
             get_impl()->search(result, queries, sp);
+            return;
+        }
+
+        // Grouped search, optionally filtered: pull batches until k distinct groups
+        // are found or the index is exhausted. No filter_stop early-exit heuristics.
+        if (grouper != nullptr) {
+            auto old_sp = get_impl()->get_search_parameters();
+            auto sp_restore = svs::lib::make_scope_guard([&]() noexcept {
+                get_impl()->set_search_parameters(old_sp);
+            });
+            get_impl()->set_search_parameters(sp);
+
+            svs::DistanceDispatcher distance_dispatcher(to_svs_distance(metric_type_));
+            std::function<bool(float, float)> closer = distance_dispatcher([](auto&& dist) {
+                return std::function<bool(float, float)>{svs::distance::comparator(dist)};
+            });
+
+            const auto max_batch_size = get_impl()->size();
+            const auto initial_batch_size =
+                std::max(k, sp.buffer_config_.get_search_window_size());
+
+            auto grouped_closure = [&](const auto& range, uint64_t SVS_UNUSED(tid)) {
+                for (auto i : range) {
+                    auto query = queries.get_datum(i);
+                    auto iterator = get_impl()->batch_iterator(query);
+                    auto best = grouped_topk(
+                        iterator,
+                        k,
+                        filter,
+                        *grouper,
+                        closer,
+                        initial_batch_size,
+                        max_batch_size
+                    );
+                    size_t found = 0;
+                    for (; found < best.size(); ++found) {
+                        result.set(best[found], i, found);
+                    }
+                    for (size_t j = found; j < k; ++j) {
+                        result.set(Neighbor{Unspecify<size_t>(), Unspecify<float>()}, i, j);
+                    }
+                }
+            };
+
+            auto threadpool = default_threadpool();
+            svs::threads::parallel_for(
+                threadpool, svs::threads::StaticPartition{queries.size()}, grouped_closure
+            );
             return;
         }
 
@@ -222,7 +271,8 @@ class VamanaIndexImpl {
         float radius,
         const ResultsAllocator& results,
         const VamanaIndex::SearchParams* params = nullptr,
-        IDFilter* filter = nullptr
+        IDFilter* filter = nullptr,
+        IDGrouper* grouper = nullptr
     ) const {
         if (radius <= 0) {
             throw StatusException{
@@ -297,6 +347,11 @@ class VamanaIndexImpl {
                         }
                     }
                 } while (in_range && !iterator.done());
+
+                // Grouped range search: keep the best element of each group.
+                if (grouper != nullptr) {
+                    reduce_to_group_best(all_results[i], *grouper, compare);
+                }
             }
         };
 

@@ -19,3 +19,5 @@
 * In-memory (mmap) stream index mapping with new `map_to_file` and `map_to_memory` APIs on `FlatIndex` and `VamanaIndex` (#310)
 
 * Add get_distance and reconstruct_at to VamanaIndex API (#315)
+
+* Grouped (one-best-per-group) search: new `IDGrouper` parameter on `VamanaIndex::search`/`range_search` for multi-vector (nested) documents; k counts distinct groups, composes with `IDFilter`

@@ -57,6 +57,7 @@ inline bool lvq_leanvec_enabled() { return false; }
 #include <memory>
 #include <random>
 #include <type_traits>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -479,6 +480,90 @@ inline size_t sample_size_for_filter_stop(float filter_stop) {
         return kFilterSampleSize;
     }
     return std::max(kFilterSampleSize, static_cast<size_t>(1.0f / filter_stop));
+}
+
+// Grouped (one-best-per-group) top-k over a batch iterator: pulls batches until k
+// distinct groups are collected or the iterator is exhausted, keeping the best element
+// of each group. A non-null filter decides candidacy before grouping.
+// Returns up to k neighbors sorted by distance.
+template <typename BatchIterator, typename Compare>
+std::vector<Neighbor<size_t>> grouped_topk(
+    BatchIterator& iterator,
+    size_t k,
+    IDFilter* filter,
+    const IDGrouper& grouper,
+    const Compare& closer, // closer(a, b): distance a is closer than b
+    size_t initial_batch_size,
+    size_t max_batch_size
+) {
+    std::vector<Neighbor<size_t>> best;
+    best.reserve(k);
+    std::unordered_map<size_t, size_t> group_slot; // group id -> index in best
+    size_t total_checked = 0;
+    auto batch_size = initial_batch_size;
+    do {
+        batch_size = predict_further_processing(
+            total_checked, best.size(), k, batch_size, max_batch_size
+        );
+        iterator.next(batch_size);
+        total_checked += iterator.size();
+        for (auto& neighbor : iterator.results()) {
+            if (filter != nullptr && !filter->is_member(neighbor.id())) {
+                continue;
+            }
+            const size_t group = grouper.get_group(neighbor.id());
+            const auto candidate = Neighbor<size_t>{neighbor.id(), neighbor.distance()};
+            if (group == IDGrouper::NO_GROUP) {
+                // Ungrouped: counts as its own group, never deduplicated.
+                if (best.size() < k) {
+                    best.push_back(candidate);
+                }
+                continue;
+            }
+            auto [slot, inserted] = group_slot.try_emplace(group, best.size());
+            if (inserted) {
+                if (best.size() < k) {
+                    best.push_back(candidate);
+                } else {
+                    // Already have k groups; drop the marker so later members of
+                    // this group are not mistaken for a kept slot.
+                    group_slot.erase(slot);
+                }
+            } else if (closer(candidate.distance(), best[slot->second].distance())) {
+                best[slot->second] = candidate;
+            }
+        }
+    } while (best.size() < k && !iterator.done());
+
+    // Min-merging can improve a kept entry, so establish the final order explicitly.
+    std::stable_sort(best.begin(), best.end(), [&](const auto& a, const auto& b) {
+        return closer(a.distance(), b.distance());
+    });
+    return best;
+}
+
+// Reduce a result list to one best element per group, in place, preserving the
+// first-seen order of groups. Ungrouped ids (NO_GROUP) are always kept.
+template <typename Compare>
+void reduce_to_group_best(
+    std::vector<Neighbor<size_t>>& results, const IDGrouper& grouper, const Compare& closer
+) {
+    std::unordered_map<size_t, size_t> group_slot; // group id -> index in kept prefix
+    size_t kept = 0;
+    for (const auto& neighbor : results) {
+        const size_t group = grouper.get_group(neighbor.id());
+        if (group == IDGrouper::NO_GROUP) {
+            results[kept++] = neighbor;
+            continue;
+        }
+        auto [slot, inserted] = group_slot.try_emplace(group, kept);
+        if (inserted) {
+            results[kept++] = neighbor;
+        } else if (closer(neighbor.distance(), results[slot->second].distance())) {
+            results[slot->second] = neighbor;
+        }
+    }
+    results.resize(kept);
 }
 
 // Fill all result slots with unspecified values.

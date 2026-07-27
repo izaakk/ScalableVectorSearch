@@ -72,6 +72,7 @@ struct SVS_RUNTIME_API VamanaIndex {
     virtual Status add(size_t n, const float* x) noexcept = 0;
     virtual Status reset() noexcept = 0;
 
+    // With a non-null grouper, returns one best element per group; k counts distinct groups.
     virtual Status search(
         size_t n,
         const float* x,
@@ -79,16 +80,19 @@ struct SVS_RUNTIME_API VamanaIndex {
         float* distances,
         size_t* labels,
         const SearchParams* params = nullptr,
-        IDFilter* filter = nullptr
+        IDFilter* filter = nullptr,
+        IDGrouper* grouper = nullptr
     ) const noexcept = 0;
 
+    // With a non-null grouper, returns the best element of each group within the radius.
     virtual Status range_search(
         size_t n,
         const float* x,
         float radius,
         const ResultsAllocator& results,
         const SearchParams* params = nullptr,
-        IDFilter* filter = nullptr
+        IDFilter* filter = nullptr,
+        IDGrouper* grouper = nullptr
     ) const noexcept = 0;
 
     // Compute distance between stored vector `id` and `query` (dim floats).

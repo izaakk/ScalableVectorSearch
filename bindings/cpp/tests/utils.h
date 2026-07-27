@@ -95,6 +95,26 @@ class IDFilterRange : public svs::runtime::v0::IDFilter {
     bool is_member(size_t id) const override { return id >= min_id_ && id < max_id_; }
 };
 
+// Table-backed grouper: group of id i is table[i]; ids beyond the table are ungrouped.
+class IDGrouperTable : public svs::runtime::v0::IDGrouper {
+  private:
+    std::vector<size_t> table_;
+
+  public:
+    explicit IDGrouperTable(std::vector<size_t> table)
+        : table_(std::move(table)) {}
+
+    size_t get_group(size_t id) const override {
+        return id < table_.size() ? table_[id] : NO_GROUP;
+    }
+};
+
+// Maps every id to NO_GROUP (the ungrouped degenerate case).
+class IDGrouperNone : public svs::runtime::v0::IDGrouper {
+  public:
+    size_t get_group(size_t) const override { return NO_GROUP; }
+};
+
 // Custom results allocator for testing
 class TestResultsAllocator : public svs::runtime::v0::ResultsAllocator {
   private:

@@ -191,6 +191,23 @@ struct SVS_RUNTIME_API_INTERFACE IDFilter {
     bool operator()(size_t id) const { return this->is_member(id); }
 };
 
+// Optional grouping for search (one-best-per-group semantics): maps an element
+// id to its group id so that a search keeps at most one element per group (the
+// best one) and `k` counts distinct groups. An id mapped to NO_GROUP is
+// ungrouped and counts as its own group, so a grouper mapping every id to
+// NO_GROUP behaves like an ungrouped search.
+// `get_group` is called concurrently from search threads and must be
+// thread-safe, the same contract as `IDFilter::is_member`.
+struct SVS_RUNTIME_API_INTERFACE IDGrouper {
+    static constexpr size_t NO_GROUP = std::numeric_limits<size_t>::max();
+
+    virtual size_t get_group(size_t id) const = 0;
+    virtual ~IDGrouper() = default;
+
+    // Helper method to allow using IDGrouper instances as callable objects
+    size_t operator()(size_t id) const { return this->get_group(id); }
+};
+
 struct SearchResultsStorage {
     std::span<size_t> labels;
     std::span<float> distances;

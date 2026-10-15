@@ -106,7 +106,8 @@ class DynamicVamanaIndexImpl {
         svs::QueryResultView<size_t> result,
         svs::data::ConstSimpleDataView<float> queries,
         const VamanaIndex::SearchParams* params = nullptr,
-        IDFilter* filter = nullptr
+        IDFilter* filter = nullptr,
+        IDGrouper* grouper = nullptr
     ) const {
         if (!impl_) {
             auto& dists = result.distances();
@@ -128,8 +129,57 @@ class DynamicVamanaIndexImpl {
         auto sp = make_search_parameters(params);
 
         // Simple search
-        if (filter == nullptr) {
+        if (filter == nullptr && grouper == nullptr) {
             impl_->search(result, queries, sp);
+            return;
+        }
+
+        // Grouped (one-best-per-group) search, optionally composed with a
+        // filter. Does not use the filter_stop/filter_estimate_batch
+        // heuristics: grouped search keeps pulling batches until k distinct
+        // groups are found or the index is exhausted.
+        if (grouper != nullptr) {
+            auto old_sp = impl_->get_search_parameters();
+            impl_->set_search_parameters(sp);
+
+            svs::DistanceDispatcher distance_dispatcher(to_svs_distance(metric_type_));
+            std::function<bool(float, float)> closer = distance_dispatcher([](auto&& dist) {
+                return std::function<bool(float, float)>{svs::distance::comparator(dist)};
+            });
+
+            const auto max_batch_size = impl_->size();
+            const auto initial_batch_size =
+                std::max(k, sp.buffer_config_.get_search_window_size());
+
+            auto grouped_closure = [&](const auto& range, uint64_t SVS_UNUSED(tid)) {
+                for (auto i : range) {
+                    auto query = queries.get_datum(i);
+                    auto iterator = impl_->batch_iterator(query);
+                    auto best = grouped_topk(
+                        iterator,
+                        k,
+                        filter,
+                        *grouper,
+                        closer,
+                        initial_batch_size,
+                        max_batch_size
+                    );
+                    size_t found = 0;
+                    for (; found < best.size(); ++found) {
+                        result.set(best[found], i, found);
+                    }
+                    for (size_t j = found; j < k; ++j) {
+                        result.set(Neighbor{Unspecify<size_t>(), Unspecify<float>()}, i, j);
+                    }
+                }
+            };
+
+            auto threadpool = default_threadpool();
+            svs::threads::parallel_for(
+                threadpool, svs::threads::StaticPartition{queries.size()}, grouped_closure
+            );
+
+            impl_->set_search_parameters(old_sp);
             return;
         }
 
@@ -218,7 +268,8 @@ class DynamicVamanaIndexImpl {
         float radius,
         const ResultsAllocator& results,
         const VamanaIndex::SearchParams* params = nullptr,
-        IDFilter* filter = nullptr
+        IDFilter* filter = nullptr,
+        IDGrouper* grouper = nullptr
     ) const {
         if (!impl_) {
             throw StatusException{ErrorCode::NOT_INITIALIZED, "Index not initialized"};
@@ -291,6 +342,12 @@ class DynamicVamanaIndexImpl {
                         }
                     }
                 } while (in_range && !iterator.done());
+
+                // Grouped range search: keep the best element of each group
+                // among the elements within the radius.
+                if (grouper != nullptr) {
+                    reduce_to_group_best(all_results[i], *grouper, compare);
+                }
             }
         };
 

@@ -139,10 +139,8 @@ class VamanaIndexImpl {
             return;
         }
 
-        // Grouped (one-best-per-group) search, optionally composed with a
-        // filter. Does not use the filter_stop/filter_estimate_batch
-        // heuristics: grouped search keeps pulling batches until k distinct
-        // groups are found or the index is exhausted.
+        // Grouped search (optionally filtered): pull batches until k distinct
+        // groups are found or the index is exhausted; no filter_stop early exit.
         if (grouper != nullptr) {
             auto old_sp = get_impl()->get_search_parameters();
             auto sp_restore = svs::lib::make_scope_guard([&]() noexcept {
@@ -351,8 +349,7 @@ class VamanaIndexImpl {
                     }
                 } while (in_range && !iterator.done());
 
-                // Grouped range search: keep the best element of each group
-                // among the elements within the radius.
+                // Grouped range search: best element of each group within the radius.
                 if (grouper != nullptr) {
                     reduce_to_group_best(all_results[i], *grouper, compare);
                 }

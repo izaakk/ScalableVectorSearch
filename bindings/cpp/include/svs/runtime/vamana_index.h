@@ -128,15 +128,9 @@ struct SVS_RUNTIME_API VamanaIndex {
         VamanaIndex** index, std::istream& in, MetricType metric, StorageKind storage_kind
     ) noexcept;
 
-    // Grouped search (one-best-per-group). New virtuals are appended at the
-    // end so existing consumers keep their vtable layout; no defaults, so the
-    // seven-argument `search` / six-argument `range_search` stay unambiguous.
-    // With a non-null `grouper`, at most one element per group (the best one)
-    // is returned and `k` counts distinct groups; if fewer than `k` distinct
-    // groups exist, the result is under-filled, matching the behavior when
-    // fewer than `k` elements match a filter. `filter` decides candidacy,
-    // `grouper` deduplicates results. A null `grouper` is the ungrouped search.
-    // Consumers built against older headers can test SVS_RUNTIME_HAVE_IDGROUPER.
+    // Grouped search: at most one element per group (the best), `k` counts
+    // distinct groups, a null `grouper` is the ungrouped search. Appended after
+    // the last virtual (#385); no defaults, so the existing overloads stay unambiguous.
     virtual Status search(
         size_t n,
         const float* x,
@@ -148,8 +142,7 @@ struct SVS_RUNTIME_API VamanaIndex {
         IDGrouper* grouper
     ) const noexcept = 0;
 
-    // With a non-null `grouper`, returns the best element of each group among
-    // the elements within the radius.
+    // Grouped range search: the best element of each group within the radius.
     virtual Status range_search(
         size_t n,
         const float* x,

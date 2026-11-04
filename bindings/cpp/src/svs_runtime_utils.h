@@ -482,12 +482,9 @@ inline size_t sample_size_for_filter_stop(float filter_stop) {
     return std::max(kFilterSampleSize, static_cast<size_t>(1.0f / filter_stop));
 }
 
-// Grouped (one-best-per-group) top-k accumulation over a batch iterator.
-// Pulls batches until `k` distinct groups are collected or the iterator is
-// exhausted, keeping the best (per `closer`) element of each group. Ids mapped
-// to IDGrouper::NO_GROUP are ungrouped: each counts as its own group. A
-// non-null `filter` decides candidacy before grouping. Returns up to `k`
-// neighbors sorted by distance.
+// Grouped top-k over a batch iterator: pull batches until `k` distinct groups are
+// found or the iterator is exhausted, keeping the best element per group.
+// NO_GROUP ids each count as their own group; `filter` is applied first.
 template <typename BatchIterator, typename Compare>
 std::vector<Neighbor<size_t>> grouped_topk(
     BatchIterator& iterator,
@@ -527,28 +524,23 @@ std::vector<Neighbor<size_t>> grouped_topk(
                 if (best.size() < k) {
                     best.push_back(candidate);
                 } else {
-                    // Already have k groups; drop the marker so later members of
-                    // this group are not mistaken for a kept slot.
+                    // k groups kept: drop the marker so later members find no slot.
                     group_slot.erase(slot);
                 }
             } else if (closer(candidate.distance(), best[slot->second].distance())) {
-                // A closer member of an already-kept group: keep the best one.
                 best[slot->second] = candidate;
             }
         }
     } while (best.size() < k && !iterator.done());
 
-    // Batches arrive in roughly increasing distance and min-merging can improve
-    // a kept entry, so establish the final by-distance order explicitly.
+    // Replacements can break the by-distance order; restore it.
     std::stable_sort(best.begin(), best.end(), [&](const auto& a, const auto& b) {
         return closer(a.distance(), b.distance());
     });
     return best;
 }
 
-// Reduce a per-query result list to one best (per `closer`) element per group,
-// in place, preserving the first-seen order of groups. Ids mapped to
-// IDGrouper::NO_GROUP are ungrouped and always kept.
+// In place: keep the best element per group (first-seen group order); NO_GROUP ids stay.
 template <typename Compare>
 void reduce_to_group_best(
     std::vector<Neighbor<size_t>>& results, const IDGrouper& grouper, const Compare& closer

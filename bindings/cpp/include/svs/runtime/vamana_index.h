@@ -136,6 +136,7 @@ struct SVS_RUNTIME_API VamanaIndex {
     // groups exist, the result is under-filled, matching the behavior when
     // fewer than `k` elements match a filter. `filter` decides candidacy,
     // `grouper` deduplicates results. A null `grouper` is the ungrouped search.
+    // Consumers built against older headers can test SVS_RUNTIME_HAVE_IDGROUPER.
     virtual Status search(
         size_t n,
         const float* x,

@@ -1,9 +1,3 @@
-# Unreleased
-
-## Additions and Changes
-
-* Grouped (one-best-per-group) search: new `IDGrouper` parameter on `VamanaIndex::search`/`range_search` for multi-vector (nested) documents; k counts distinct groups and the grouper composes with `IDFilter`; `SVS_RUNTIME_HAVE_IDGROUPER` is defined so consumers can detect the overloads at compile time
-
 # SVS 0.5.0 Release Notes
 
 ## Additions and Changes

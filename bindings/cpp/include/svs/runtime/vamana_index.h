@@ -130,7 +130,9 @@ struct SVS_RUNTIME_API VamanaIndex {
 
     // Grouped search: at most one element per group (the best), `k` counts
     // distinct groups, a null `grouper` is the ungrouped search. Appended after
-    // the last virtual (#385); no defaults, so the existing overloads stay unambiguous.
+    // the last virtual (#385): VamanaIndex slots are unchanged, the virtuals
+    // DynamicVamanaIndex declares after them move down two, so consumers rebuild
+    // (as for #385). No defaults, so the existing overloads stay unambiguous.
     virtual Status search(
         size_t n,
         const float* x,

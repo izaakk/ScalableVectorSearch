@@ -27,6 +27,7 @@
 #include <svs/extensions/vamana/scalar.h>
 #include <svs/lib/file.h>
 #include <svs/lib/float16.h>
+#include <svs/lib/scopeguard.h>
 #include <svs/orchestrators/dynamic_vamana.h>
 #include <svs/quantization/scalar/scalar.h>
 
@@ -135,6 +136,9 @@ class DynamicVamanaIndexImpl {
         }
 
         auto old_sp = impl_->get_search_parameters();
+        auto sp_restore = svs::lib::make_scope_guard([&]() noexcept {
+            impl_->set_search_parameters(old_sp);
+        });
         impl_->set_search_parameters(sp);
         float filter_stop = 0.0f;
         bool filter_estimate_batch = true;
@@ -159,7 +163,6 @@ class DynamicVamanaIndexImpl {
             );
             if (should_stop_filtered_search(sampled, sample_hits, filter_stop)) {
                 pad_empty_results(result, queries.size(), k);
-                impl_->set_search_parameters(old_sp);
                 return;
             }
             initial_batch_size = predict_further_processing(
@@ -204,7 +207,6 @@ class DynamicVamanaIndexImpl {
             svs::threads::parallel_for(
                 threadpool, svs::threads::StaticPartition{queries.size()}, grouped_closure
             );
-            impl_->set_search_parameters(old_sp);
             return;
         }
 
@@ -251,8 +253,6 @@ class DynamicVamanaIndexImpl {
         svs::threads::parallel_for(
             threadpool, svs::threads::StaticPartition{queries.size()}, search_closure
         );
-
-        impl_->set_search_parameters(old_sp);
     }
 
     void range_search(

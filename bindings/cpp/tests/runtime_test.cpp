@@ -1184,6 +1184,179 @@ CATCH_TEST_CASE("RangeSearchWithIDGrouper", "[runtime][grouped_search]") {
     svs::runtime::v0::DynamicVamanaIndex::destroy(index);
 }
 
+CATCH_TEST_CASE(
+    "GroupedSearchFilterStopEarlyExit", "[runtime][grouped_search][filtered_search]"
+) {
+    const auto data = create_grouped_test_data();
+    // Build index
+    svs::runtime::v0::DynamicVamanaIndex* index = nullptr;
+    svs::runtime::v0::VamanaIndex::BuildParams build_params{64};
+    svs::runtime::v0::Status status = svs::runtime::v0::DynamicVamanaIndex::build(
+        &index,
+        test_d,
+        svs::runtime::v0::MetricType::L2,
+        svs::runtime::v0::StorageKind::FP32,
+        build_params
+    );
+    CATCH_REQUIRE(status.ok());
+    CATCH_REQUIRE(index != nullptr);
+
+    // Add data
+    std::vector<size_t> labels(test_n);
+    std::iota(labels.begin(), labels.end(), 0);
+    status = index->add(test_n, labels.data(), data.data());
+    CATCH_REQUIRE(status.ok());
+
+    test_utils::IDGrouperTable grouper(create_grouped_test_table());
+    // 10% selectivity: the filter admits only the singletons, ids 90-99
+    test_utils::IDFilterRange filter(grouped_crowd_size, test_n);
+    const std::vector<float> query(test_d, 0.0f);
+    const size_t k = 5;
+
+    std::vector<float> distances(k);
+    std::vector<size_t> result_labels(k);
+
+    // filter_stop = 0.5 (50%): the pre-search sample sees ~10% and gives up
+    svs::runtime::v0::VamanaIndex::SearchParams search_params;
+    search_params.filter_stop = 0.5f;
+    status = index->search(
+        1,
+        query.data(),
+        k,
+        distances.data(),
+        result_labels.data(),
+        &search_params,
+        &filter,
+        &grouper
+    );
+    CATCH_REQUIRE(status.ok());
+    for (size_t i = 0; i < k; ++i) {
+        CATCH_REQUIRE(!svs::runtime::v0::is_specified(result_labels[i]));
+    }
+
+    // Same without the sample: the first batches hold only the crowd, so the
+    // per-batch hit-rate check gives up
+    search_params.filter_estimate_batch = false;
+    status = index->search(
+        1,
+        query.data(),
+        k,
+        distances.data(),
+        result_labels.data(),
+        &search_params,
+        &filter,
+        &grouper
+    );
+    CATCH_REQUIRE(status.ok());
+    for (size_t i = 0; i < k; ++i) {
+        CATCH_REQUIRE(!svs::runtime::v0::is_specified(result_labels[i]));
+    }
+
+    // Without filter_stop the search reaches the singletons: ids 90-94 in distance order
+    status = index->search(
+        1,
+        query.data(),
+        k,
+        distances.data(),
+        result_labels.data(),
+        nullptr,
+        &filter,
+        &grouper
+    );
+    CATCH_REQUIRE(status.ok());
+    for (size_t i = 0; i < k; ++i) {
+        CATCH_REQUIRE(result_labels[i] == grouped_crowd_size + i);
+    }
+
+    svs::runtime::v0::DynamicVamanaIndex::destroy(index);
+}
+
+CATCH_TEST_CASE(
+    "GroupedSearchFilterStopEarlyExitStatic",
+    "[runtime][static_vamana][grouped_search][filtered_search]"
+) {
+    const auto data = create_grouped_test_data();
+    // Build index
+    svs::runtime::v0::VamanaIndex* index = nullptr;
+    svs::runtime::v0::VamanaIndex::BuildParams build_params{64};
+    svs::runtime::v0::Status status = svs::runtime::v0::VamanaIndex::build(
+        &index,
+        test_d,
+        svs::runtime::v0::MetricType::L2,
+        svs::runtime::v0::StorageKind::FP32,
+        build_params
+    );
+    CATCH_REQUIRE(status.ok());
+    CATCH_REQUIRE(index != nullptr);
+
+    // Add data
+    status = index->add(test_n, data.data());
+    CATCH_REQUIRE(status.ok());
+
+    test_utils::IDGrouperTable grouper(create_grouped_test_table());
+    // 10% selectivity: the filter admits only the singletons, ids 90-99
+    test_utils::IDFilterRange filter(grouped_crowd_size, test_n);
+    const std::vector<float> query(test_d, 0.0f);
+    const size_t k = 5;
+
+    std::vector<float> distances(k);
+    std::vector<size_t> result_labels(k);
+
+    // filter_stop = 0.5 (50%): the pre-search sample sees ~10% and gives up
+    svs::runtime::v0::VamanaIndex::SearchParams search_params;
+    search_params.filter_stop = 0.5f;
+    status = index->search(
+        1,
+        query.data(),
+        k,
+        distances.data(),
+        result_labels.data(),
+        &search_params,
+        &filter,
+        &grouper
+    );
+    CATCH_REQUIRE(status.ok());
+    for (size_t i = 0; i < k; ++i) {
+        CATCH_REQUIRE(!svs::runtime::v0::is_specified(result_labels[i]));
+    }
+
+    // Same without the sample: the first batches hold only the crowd, so the
+    // per-batch hit-rate check gives up
+    search_params.filter_estimate_batch = false;
+    status = index->search(
+        1,
+        query.data(),
+        k,
+        distances.data(),
+        result_labels.data(),
+        &search_params,
+        &filter,
+        &grouper
+    );
+    CATCH_REQUIRE(status.ok());
+    for (size_t i = 0; i < k; ++i) {
+        CATCH_REQUIRE(!svs::runtime::v0::is_specified(result_labels[i]));
+    }
+
+    // Without filter_stop the search reaches the singletons: ids 90-94 in distance order
+    status = index->search(
+        1,
+        query.data(),
+        k,
+        distances.data(),
+        result_labels.data(),
+        nullptr,
+        &filter,
+        &grouper
+    );
+    CATCH_REQUIRE(status.ok());
+    for (size_t i = 0; i < k; ++i) {
+        CATCH_REQUIRE(result_labels[i] == grouped_crowd_size + i);
+    }
+
+    svs::runtime::v0::VamanaIndex::destroy(index);
+}
+
 CATCH_TEST_CASE("MemoryUsageOnLoad", "[runtime][memory]") {
     constexpr auto file_threshold =
         [](size_t generated_data_bytes, size_t dim, size_t graph_max_degree) {

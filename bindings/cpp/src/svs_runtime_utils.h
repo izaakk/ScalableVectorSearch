@@ -484,12 +484,15 @@ inline size_t sample_size_for_filter_stop(float filter_stop) {
 
 // Grouped top-k over a batch iterator: pull batches until `k` distinct groups are
 // found or the iterator is exhausted, keeping the best element per group.
-// NO_GROUP ids each count as their own group; `filter` is applied first.
+// NO_GROUP ids each count as their own group; `filter` is applied first, and the
+// search gives up (empty result) while short of `k` groups if the filter hit rate
+// falls below `filter_stop`, as in the filtered search.
 template <typename BatchIterator, typename Compare>
 std::vector<Neighbor<size_t>> grouped_topk(
     BatchIterator& iterator,
     size_t k,
     IDFilter* filter,
+    float filter_stop,
     const IDGrouper& grouper,
     const Compare& closer, // closer(a, b): distance `a` is closer than `b`
     size_t initial_batch_size,
@@ -499,6 +502,7 @@ std::vector<Neighbor<size_t>> grouped_topk(
     best.reserve(k);
     std::unordered_map<size_t, size_t> group_slot; // group id -> index in `best`
     size_t total_checked = 0;
+    size_t filter_hits = 0;
     auto batch_size = initial_batch_size;
     do {
         batch_size = predict_further_processing(
@@ -510,6 +514,7 @@ std::vector<Neighbor<size_t>> grouped_topk(
             if (filter != nullptr && !filter->is_member(neighbor.id())) {
                 continue;
             }
+            filter_hits++;
             const size_t group = grouper.get_group(neighbor.id());
             const auto candidate = Neighbor<size_t>{neighbor.id(), neighbor.distance()};
             if (group == IDGrouper::NO_GROUP) {
@@ -530,6 +535,10 @@ std::vector<Neighbor<size_t>> grouped_topk(
             } else if (closer(candidate.distance(), best[slot->second].distance())) {
                 best[slot->second] = candidate;
             }
+        }
+        if (best.size() < k &&
+            should_stop_filtered_search(total_checked, filter_hits, filter_stop)) {
+            return {};
         }
     } while (best.size() < k && !iterator.done());
 

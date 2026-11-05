@@ -1234,9 +1234,10 @@ CATCH_TEST_CASE(
         CATCH_REQUIRE(!svs::runtime::v0::is_specified(result_labels[i]));
     }
 
-    // Same without the sample: the first batches hold only the crowd, so the
-    // per-batch hit-rate check gives up
+    // Same without the sample: a first batch of max(k, search_window_size) ids holds
+    // only the crowd (ninety ids), so the per-batch hit-rate check gives up
     search_params.filter_estimate_batch = false;
+    search_params.search_window_size = 10;
     status = index->search(
         1,
         query.data(),
@@ -1320,9 +1321,10 @@ CATCH_TEST_CASE(
         CATCH_REQUIRE(!svs::runtime::v0::is_specified(result_labels[i]));
     }
 
-    // Same without the sample: the first batches hold only the crowd, so the
-    // per-batch hit-rate check gives up
+    // Same without the sample: a first batch of max(k, search_window_size) ids holds
+    // only the crowd (ninety ids), so the per-batch hit-rate check gives up
     search_params.filter_estimate_batch = false;
+    search_params.search_window_size = 10;
     status = index->search(
         1,
         query.data(),

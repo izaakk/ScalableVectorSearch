@@ -511,6 +511,11 @@ std::vector<Neighbor<size_t>> grouped_topk(
         iterator.next(batch_size);
         total_checked += iterator.size();
         for (auto& neighbor : iterator.results()) {
+            // Batches are sorted by distance: with k groups kept, nothing later in
+            // the batch can improve them.
+            if (best.size() == k) {
+                break;
+            }
             if (filter != nullptr && !filter->is_member(neighbor.id())) {
                 continue;
             }
@@ -519,19 +524,12 @@ std::vector<Neighbor<size_t>> grouped_topk(
             const auto candidate = Neighbor<size_t>{neighbor.id(), neighbor.distance()};
             if (group == IDGrouper::NO_GROUP) {
                 // Ungrouped id: counts as its own group, never deduplicated.
-                if (best.size() < k) {
-                    best.push_back(candidate);
-                }
+                best.push_back(candidate);
                 continue;
             }
             auto [slot, inserted] = group_slot.try_emplace(group, best.size());
             if (inserted) {
-                if (best.size() < k) {
-                    best.push_back(candidate);
-                } else {
-                    // k groups kept: drop the marker so later members find no slot.
-                    group_slot.erase(slot);
-                }
+                best.push_back(candidate);
             } else if (closer(candidate.distance(), best[slot->second].distance())) {
                 best[slot->second] = candidate;
             }
